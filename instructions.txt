@@ -1,0 +1,24 @@
+Tu upload les fichiers modifiés avec FileZilla (SFTP) dans ddev/Butler
+
+En SSH, tu fais :
+
+cd ~/ddev/Butler
+pm2 restart butler
+pm2 logs butler --lines 30
+
+
+Si tu as aussi modifié les dépendances (package.json / package-lock.json)
+Après l’upload, en SSH :
+
+cd ~/ddev/Butler
+npm ci (recommandé si tu as package-lock.json)
+pm2 restart butler
+pm2 logs butler --lines 30
+
+
+Si tu ajoutes/modifies des Slash Commands
+Après l’upload, en SSH :
+
+cd ~/ddev/Butler
+npm run register
+pm2 restart butler

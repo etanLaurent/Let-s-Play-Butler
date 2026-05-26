@@ -1,0 +1,92 @@
+const WHEEL_TIERS = {
+	BAD: 'mauvaise',
+	NORMAL: 'normale',
+	SUPER: 'super',
+};
+
+// Récompenses provisoires (on pourra les ajuster ensuite)
+// IMPORTANT: `label` = texte court affiché sur la roue PNG (sans emoji/accents si possible).
+//            `text`  = texte envoyé dans le message Discord.
+const FORTUNE_WHEELS = {
+	[WHEEL_TIERS.BAD]: [
+		{ label: 'Rien', text: 'Vous n\'avez rien gagné.' },
+		{ label: '5 €', text: 'Vous obtenez 5 €.' },
+		{ label: 'Punis roue', text: 'Roue bloqué 144 h 🟥' },
+		{ label: '-10 €', text: 'Vous perdez 10 €.' },
+		{ label: 'Moquerie', text: 'Bouuuuuuuh on se moque de toi 😂' },
+		{ label: 'Vide', text: 'Vide 😐' },
+		{ label: '25 €', text: 'Vous obtenez 25 €.' },
+		{ label: 'Non', text: 'Juste non ❌' },
+		{ label: '0.01 €', text: 'Vous obtenez 0.01 €.' },
+	],
+	[WHEEL_TIERS.NORMAL]: [
+		{ label: 'RIEN', text: 'Rien 😐' },
+		{ label: '300 €', text: 'Vous obtenez 300 €.' },
+		{ label: 'Relance', text: 'Relance la roue 🔄' },
+		{ label: '150 €', text: 'Vous obtenez 150 €.' },
+		{ label: 'Petit chrono', text: 'Tu n\'obtiens rien mais rejoue dans 12 h ⏱️' },
+		{ label: 'Relance', text: 'Rejouer 🔁' },
+		{ label: '500 €', text: 'Vous obtenez 500 €.' },
+		{ label: '2000 Exp', text: 'Vous obtenez 2000 points d\'expérience Draftbot. Votre récompense arrivera bientôt !' },
+		{ label: 'Relance X1.2', text: 'Relance le roue et gagne 20 % de plus 🚀' },
+	],
+	[WHEEL_TIERS.SUPER]: [
+		{ label: 'JACKPOT', text: 'Jackpot 5000 € et 3 niveaux Draftbot 🏆' },
+		{ label: 'Relance X3', text: 'Relance le roue et gagne trois fois plus💎' },
+		{ label: 'Double Relance', text: 'Tu as le droit de lancer la roue à nouveau deux fois ✨' },
+		{ label: '1 Level', text: 'Un niveau Draftbot, votre récompense arrivera bientôt ! 🔥' },
+		{ label: 'Ah non...', text: 'La super roue ne t\'aime pas' },
+		{ label: 'Chanceux', text: 'Obtiens le rôle chanceux, si déjà obtenu, 2000 € 👑' },
+		{ label: '1750 €', text: 'Coffre de 1750 € 🧰' },
+		{ label: '100 €', text: '100 € 🟣' },
+		{ label: 'Super Relance', text: 'Relance la super roue 🔄' },
+	],
+};
+
+function pickRandom(items) {
+	return items[Math.floor(Math.random() * items.length)];
+}
+
+function spinTier() {
+	// Ratio: 60% normale, 25% mauvaise, 15% super
+	const r = Math.random();
+	if (r < 0.25) return WHEEL_TIERS.BAD;
+	if (r < 0.25 + 0.60) return WHEEL_TIERS.NORMAL;
+	return WHEEL_TIERS.SUPER;
+}
+
+function spinReward(tier) {
+	const rewards = FORTUNE_WHEELS[tier] || [];
+	const picked = rewards.length ? pickRandom(rewards) : null;
+	return picked ? picked.text : 'Récompense à définir';
+}
+
+function spinRewardWithIndex(tier) {
+	const rewards = FORTUNE_WHEELS[tier] || [];
+	if (!rewards.length) {
+		return { index: 0, reward: 'Récompense à définir', label: '', labels: [], rewards: [] };
+	}
+	const index = Math.floor(Math.random() * rewards.length);
+	return {
+		index,
+		reward: rewards[index].text,
+		label: rewards[index].label,
+		labels: rewards.map((r) => r.label),
+		rewards: rewards.map((r) => r.text),
+	};
+}
+
+function spinFortune() {
+	const tier = spinTier();
+	const reward = spinReward(tier);
+	return { tier, reward };
+}
+
+module.exports = {
+	WHEEL_TIERS,
+	FORTUNE_WHEELS,
+	spinTier,
+	spinReward,
+	spinRewardWithIndex,
+	spinFortune,
+};

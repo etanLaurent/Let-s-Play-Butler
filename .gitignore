@@ -1,0 +1,14 @@
+# Node
+Butler/node_modules/
+Butler/npm-debug.log*
+Butler/yarn-error.log*
+
+# Secrets
+.env
+.env.*
+Butler/token.js
+Clé/
+cle/
+
+# Data (wallet, cooldowns)
+Butler/data/
