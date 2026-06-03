@@ -1,4 +1,13 @@
-const { AttachmentBuilder, Client, Events, GatewayIntentBits } = require('discord.js');
+const {
+	AttachmentBuilder,
+	Client,
+	Events,
+	GatewayIntentBits,
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
+	ComponentType,
+} = require('discord.js');
 const { getDiscordToken } = require('./token');
 const { formatHelpTopic, getHelpTopicKeys } = require('./helpTopics');
 const { spinRewardWithIndex, spinTier } = require('./fortune');
@@ -8,6 +17,9 @@ const {
 	addBalance,
 	getFortuneCooldownUntilMs,
 	setFortuneCooldownUntilMs,
+	getPendingMultiplier,
+	setPendingMultiplier,
+	clearPendingMultiplier,
 } = require('./wallet');
 
 // (Ancien) message Draftbot — désactivé par défaut, voir DROPXP_ENABLED.
@@ -176,7 +188,6 @@ async function resolveDropXpChannel(discordClient) {
 		}
 	}
 
-	// Fallback par nom (moins fiable). Pour ton cas: "┃💬┃général".
 	const targetName = (process.env.DROPXP_CHANNEL_NAME || '┃💬┃général').trim();
 
 	const matches = [];
@@ -200,7 +211,6 @@ function computeNextRandomRun(now = new Date()) {
 	candidate.setSeconds(0, 0);
 	candidate.setHours(hours, minutes, 0, 0);
 
-	// Si l'heure tirée est déjà passée (ou trop proche), on planifie pour demain.
 	if (candidate.getTime() <= now.getTime() + 60_000) {
 		candidate.setDate(candidate.getDate() + 1);
 	}
@@ -208,8 +218,6 @@ function computeNextRandomRun(now = new Date()) {
 }
 
 async function scheduleDailyRandomDropXp(discordClient) {
-	// Désactivé par défaut (tu as dit "on abandonne").
-	// Pour réactiver: définir DROPXP_ENABLED=1
 	const enabled = (process.env.DROPXP_ENABLED || '').toLowerCase();
 	if (!['1', 'true', 'yes', 'y', 'on'].includes(enabled)) return;
 
@@ -239,19 +247,16 @@ async function scheduleDailyRandomDropXp(discordClient) {
 		} catch (err) {
 			console.error('Échec envoi /dropxp :', err);
 		} finally {
-			// Replanifie pour le lendemain à une nouvelle heure aléatoire
 			scheduleDailyRandomDropXp(discordClient);
 		}
 	}, delayMs);
 }
 
-// Message de confirmation quand le bot s'allume
 client.once(Events.ClientReady, () => {
 	console.log(`Connecté en tant que ${client.user.tag}!`);
 	scheduleDailyRandomDropXp(client);
 });
 
-// Slash commands (+ autocomplete)
 client.on(Events.InteractionCreate, async (interaction) => {
 	try {
 		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -349,14 +354,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				const until = getFortuneCooldownUntilMs(interaction.user.id);
 				const now = Date.now();
 				const remaining = until > now ? until - now : 0;
-				await interaction.reply(
-					[
-						`💰 Solde de ${interaction.user} : **${balance} €**`,
-						remaining
-							? `⏱️ Prochain /fortune dans **${formatDurationFr(remaining)}**.`
-							: `✅ /fortune disponible maintenant.`,
-					].join('\n')
-				);
+				const pendingMult = getPendingMultiplier(interaction.user.id) || 1;
+				const lines = [
+					`💰 Solde de ${interaction.user} : **${balance} €**`,
+					remaining
+						? `⏱️ Prochain /fortune dans **${formatDurationFr(remaining)}**.`
+						: `✅ /fortune disponible maintenant.`,
+				];
+				if (pendingMult && pendingMult !== 1) {
+					lines.push(`🔢 Multiplicateur en attente: **x${pendingMult}**`);
+				} else {
+					lines.push('🔢 Pas de multiplicateur en attente.');
+				}
+				await interaction.reply(lines.join('\n'));
 				return;
 			}
 			if (sub !== 'tourner') return;
@@ -365,7 +375,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				return;
 			}
 
-			// Cooldown 72h (appliqué à tout le monde, y compris Fondateur)
 			const until = getFortuneCooldownUntilMs(interaction.user.id);
 			const now = Date.now();
 			if (until && until > now) {
@@ -378,7 +387,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			await interaction.deferReply();
 
-			const header = '🎡 **Roue de la Fortune — 2 tours**';
+			const header = '🎡 **Roue de la Fortune**';
 			const bar = (filled, total) => '▰'.repeat(filled) + '▱'.repeat(Math.max(0, total - filled));
 
 			// CHARGEMENT AVANT TOUR 1
@@ -413,18 +422,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			});
 			await sleep(900);
 
-			// TOUR 2 — Séquence de spins (Relance / Double relance / X3 / X1.2)
-			const maxSpins = 5;
-			let spinsToDo = 1;
-			let pendingMultiplier = 1;
+			// TOUR 2 — Séquence de spins saine contrôlée pas-à-pas
+			const maxSpinsCap = 15;
+			let spinsRemaining = 1;
+			let currentSpinCount = 0;
+			
+			let pendingMultiplier = getPendingMultiplier(interaction.user.id) || 1;
 			let totalMoneyDelta = 0;
 			let luckyGranted = null;
 			let cooldownOverrideHours = null;
 			const spinDetails = [];
 			let lastWheelSpin = null;
 
-			while (spinsToDo > 0 && spinDetails.length < maxSpins) {
-				spinsToDo--;
+			while (spinsRemaining > 0 && currentSpinCount < maxSpinsCap) {
+				currentSpinCount++;
+				spinsRemaining--; // On décrémente le lancer actuel
+
 				const spin = spinRewardWithIndex(tier);
 				const rewardText = String(spin.reward || '');
 				const rewardLabel = String(spin.label || '');
@@ -432,19 +445,67 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 				const relance = parseRelanceEffect(rewardLabel, rewardText);
 				if (relance) {
-					spinsToDo += relance.extraSpins;
+					// On augmente le multiplicateur de manière cumulative
 					pendingMultiplier = round2(pendingMultiplier * relance.multiplier);
-					spinDetails.push(
-						`🔄 ${rewardText} → relance +${relance.extraSpins} (bonus prochain gain: x${pendingMultiplier})`
+					setPendingMultiplier(interaction.user.id, pendingMultiplier);
+					
+					spinDetails.push(`🔄 Lancer #${currentSpinCount} : ${rewardText} → (Multiplicateur cumulé: x${pendingMultiplier})`);
+
+					const row = new ActionRowBuilder().addComponents(
+						new ButtonBuilder()
+							.setCustomId('use_relance')
+							.setLabel('Utiliser la relance')
+							.setStyle(ButtonStyle.Primary)
 					);
+
+					const promptContent = [
+						header,
+						'',
+						`Tour 1 → roue: **${tier}**`,
+						'',
+						`Lancer #${currentSpinCount} : **${rewardText}**`,
+						`🔢 Multiplicateur actuel : **x${pendingMultiplier}**`,
+						'',
+						'Clique ci-dessous pour relancer la roue !'
+					].join('\n');
+
+					let clicked = false;
+					try {
+						await interaction.editReply({ content: promptContent, components: [row] });
+						const promptMsg = await interaction.fetchReply();
+						
+						// Attente stricte du clic sur le bouton
+						const btn = await promptMsg.awaitMessageComponent({
+							filter: (i) => i.user.id === interaction.user.id,
+							componentType: ComponentType.Button,
+							time: 30000
+						});
+
+						if (btn.customId === 'use_relance') {
+							clicked = true;
+							await btn.update({ content: promptContent + '\n\n*Relance activée... 🔄*', components: [] });
+							await sleep(1000);
+							
+							// On octroie les nouveaux lancers uniquement si l'utilisateur clique
+							spinsRemaining += relance.extraSpins;
+						}
+					} catch (err) {
+						// Timeout : on efface simplement le bouton
+						try { await interaction.editReply({ components: [] }); } catch {}
+					}
+
+					// CORRECTION CRITIQUE : Si le joueur n'a pas cliqué ou s'il y a eu timeout, on arrête tout
+					if (!clicked) {
+						break;
+					}
+					// Si on a cliqué, on passe au prochain tour sainement
 					continue;
 				}
 
-				// Cooldown spécial (si le texte contient "12 h", "144 h", etc.)
+				// Traitement d'une récompense classique (pas une relance)
 				const cd = parseCooldownHours(rewardText);
 				if (cd) cooldownOverrideHours = cd;
 
-				// Rôle chanceux (si présent) + argent
 				const isLuckyReward = /rôle\s+chanceux/i.test(rewardText);
 				let baseMoney = computeMoneyDelta({ label: rewardLabel, text: rewardText });
 				if (isLuckyReward) {
@@ -455,31 +516,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
 							baseMoney = 0;
 						} else if (res.ok && res.already) {
 							luckyGranted = false;
-							// baseMoney reste (ex: 2000 €)
 						}
 					} catch (err) {
 						console.error('Erreur attribution rôle chanceux:', err);
-						// on garde baseMoney si présent
 					}
 				}
 
 				let appliedMoney = baseMoney;
-				const appliedMultiplier = pendingMultiplier;
-				pendingMultiplier = 1;
-				// Bonus uniquement sur les gains positifs
-				if (appliedMoney > 0 && appliedMultiplier !== 1) {
+				let appliedMultiplier = 1;
+				
+				// APPLICATION UNIQUE : Seulement sur un gain en argent positif (> 0)
+				if (appliedMoney > 0 && pendingMultiplier !== 1) {
+					appliedMultiplier = pendingMultiplier;
 					appliedMoney = round2(appliedMoney * appliedMultiplier);
+					
+					// Le multiplicateur est consommé, on le réinitialise immédiatement
+					pendingMultiplier = 1;
+					try {
+						clearPendingMultiplier(interaction.user.id);
+					} catch (err) {
+						console.error('Erreur clear pending multiplier:', err);
+					}
 				}
+				
 				if (appliedMoney !== 0) totalMoneyDelta = round2(totalMoneyDelta + appliedMoney);
 
 				if (appliedMultiplier !== 1 && baseMoney > 0) {
-					spinDetails.push(
-						`✅ ${rewardText} → **${appliedMoney > 0 ? '+' : ''}${appliedMoney} €** (x${appliedMultiplier})`
-					);
+					spinDetails.push(`✅ Lancer #${currentSpinCount} : ${rewardText} → **+${appliedMoney} €** (x${appliedMultiplier})`);
 				} else if (appliedMoney !== 0) {
-					spinDetails.push(`✅ ${rewardText} → **${appliedMoney > 0 ? '+' : ''}${appliedMoney} €**`);
+					spinDetails.push(`✅ Lancer #${currentSpinCount} : ${rewardText} → **${appliedMoney > 0 ? '+' : ''}${appliedMoney} €**`);
 				} else {
-					spinDetails.push(`✅ ${rewardText}`);
+					spinDetails.push(`✅ Lancer #${currentSpinCount} : ${rewardText}`);
 				}
 			}
 
@@ -487,7 +554,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			if (totalMoneyDelta !== 0) {
 				newBalance = addBalance(interaction.user.id, totalMoneyDelta);
 			}
-			const hasRelance = spinDetails.some((l) => String(l).startsWith('🔄'));
+			const hasRelance = spinDetails.some((l) => String(l).includes('🔄'));
 			const finalRewardText = String((lastWheelSpin && lastWheelSpin.reward) || '');
 
 			const cooldownHours = cooldownOverrideHours || DEFAULT_FORTUNE_COOLDOWN_HOURS;
@@ -511,21 +578,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			if (tierFile) files.push(tierFile);
 			if (wheelFile) files.push(wheelFile);
 
-			// Annonce dans #┃✨┃récompenses
+			// Log et annonce de fin dans le salon récompenses
 			try {
 				const rewardsChannel = await resolveRewardsChannel(interaction.guild);
 				if (rewardsChannel) {
 					if (hasRelance) {
-						// Format détaillé uniquement s'il y a eu une vraie relance
-						const parts = [`🎡 Fortune — ${interaction.user} — Tier: **${tier}**`, 'Tour 2:'];
-						parts.push(spinDetails.map((l, i) => `#${i + 1} ${l}`).join('\n'));
+						const parts = [`🎡 Fortune — ${interaction.user} — Tier: **${tier}**`, 'Détails des lancers :'];
+						parts.push(spinDetails.map((l) => `${l}`).join('\n'));
 						if (luckyGranted === true) parts.push(`Rôle donné: **${LUCKY_ROLE_NAME}**`);
 						else if (luckyGranted === false) parts.push(`Rôle **${LUCKY_ROLE_NAME}** déjà présent.`);
 						if (totalMoneyDelta !== 0) parts.push(`Argent total: **${totalMoneyDelta > 0 ? '+' : ''}${totalMoneyDelta} €**`);
 						parts.push(`Solde: **${newBalance} €**`);
 						await rewardsChannel.send(parts.join('\n'));
 					} else {
-						// Format simple (comme ton image 2)
 						const parts = [
 							`🎡 Fortune — ${interaction.user} — Tier: **${tier}**`,
 							`Résultat: **${finalRewardText}**`,
@@ -543,14 +608,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			const replyLines = [header, '', `Tour 1 → roue: **${tier}**`];
 			if (hasRelance) {
-				replyLines.push('Tour 2:');
-				replyLines.push(spinDetails.map((l, i) => `#${i + 1} ${l}`).join('\n'));
+				replyLines.push('', 'Résumé de vos lancers :');
+				replyLines.push(spinDetails.map((l) => `${l}`).join('\n'));
 				if (totalMoneyDelta !== 0) {
-					replyLines.push(
-						`Argent total: **${totalMoneyDelta > 0 ? '+' : ''}${totalMoneyDelta} €** (solde: **${newBalance} €**)`
-					);
+					replyLines.push(`\n💰 Argent total récolté : **${totalMoneyDelta > 0 ? '+' : ''}${totalMoneyDelta} €** (Nouveau solde: **${newBalance} €**)`);
 				} else {
-					replyLines.push(`Solde: **${newBalance} €**`);
+					replyLines.push(`\n💰 Solde final : **${newBalance} €**`);
 				}
 			} else {
 				replyLines.push(`Résultat: **${finalRewardText}**`);
@@ -599,16 +662,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	}
 });
 
-// Réponse aux messages
 client.on('messageCreate', async (message) => {
-	// Éviter que le bot se réponde à lui-même
 	if (message.author.bot) return;
 
-	// Commande d'aide (avec option/sujet derrière)
-	// Exemples:
-	//  - !aide_butler
-	//  - !aide_butler ping
-	//  - !aide_butler demarrage
 	const content = message.content.trim();
 	const lower = content.toLowerCase();
 
@@ -654,7 +710,6 @@ client.on('messageCreate', async (message) => {
 		return;
 	}
 
-	// Si un utilisateur écrit "ping", le bot répond "pong"
 	if (message.content.toLowerCase() === 'ping') {
 		try {
 			await message.reply('Pong ! 🏓');
@@ -671,11 +726,10 @@ if (!token) {
 			'- Option 1 (recommandée): définir la variable d\'environnement DISCORD_TOKEN\n' +
 			'- Option 2: mettre le token dans ../cle/Butler_key.txt (une seule ligne)\n' +
 			'  (Compat: ../Clé/Butler_key.txt)\n'
-	);
+		);
 	process.exit(1);
 }
 
-// Connexion du bot grâce à son Token
 process.on('unhandledRejection', (err) => {
 	console.error('Promesse rejetée (unhandledRejection):', err);
 });

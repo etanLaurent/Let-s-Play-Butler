@@ -34,13 +34,14 @@ function writeData(data) {
 function getUserEntry(data, userId) {
 	const id = String(userId);
 	if (!data.users[id]) {
-		data.users[id] = { balance: 0, fortuneCooldownUntilMs: 0 };
+		data.users[id] = { balance: 0, fortuneCooldownUntilMs: 0, pendingMultiplier: 1 };
 	}
 	const entry = data.users[id];
 	if (typeof entry.balance !== 'number') entry.balance = Number(entry.balance) || 0;
 	if (typeof entry.fortuneCooldownUntilMs !== 'number') {
 		entry.fortuneCooldownUntilMs = Number(entry.fortuneCooldownUntilMs) || 0;
 	}
+	if (typeof entry.pendingMultiplier !== 'number') entry.pendingMultiplier = Number(entry.pendingMultiplier) || 1;
 	return entry;
 }
 
@@ -70,9 +71,30 @@ function setFortuneCooldownUntilMs(userId, untilMs) {
 	return entry.fortuneCooldownUntilMs;
 }
 
+function getPendingMultiplier(userId) {
+	const data = readData();
+	const entry = getUserEntry(data, userId);
+	return Number(entry.pendingMultiplier) || 1;
+}
+
+function setPendingMultiplier(userId, multiplier) {
+	const data = readData();
+	const entry = getUserEntry(data, userId);
+	entry.pendingMultiplier = Number(multiplier) || 1;
+	writeData(data);
+	return entry.pendingMultiplier;
+}
+
+function clearPendingMultiplier(userId) {
+	return setPendingMultiplier(userId, 1);
+}
+
 module.exports = {
 	getBalance,
 	addBalance,
 	getFortuneCooldownUntilMs,
 	setFortuneCooldownUntilMs,
+	getPendingMultiplier,
+	setPendingMultiplier,
+	clearPendingMultiplier,
 };
