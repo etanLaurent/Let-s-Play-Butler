@@ -43,6 +43,30 @@ const FORTUNE_WHEELS = {
 	],
 };
 
+const GRAND_RISK_WHEEL = [
+	{ label: 'Rien', text: 'Reste où tu en es je pense 😐' },
+	{ label: '8 Level', text: '8 niveaux Draftbot, votre récompense arrivera bientôt ! 🎯' },
+	{ label: '3500 €', text: '3500 € 🟠' },
+	{ label: '-1000 €', text: 'Perds 1000 € 🥲' },
+	{ label: '-200 €', text: 'Perds 200 € 😶' },
+	{ label: 'Triple Jackpot', text: '15000 € et 9 niveaux Draftbot 🏆' },
+	{ label: 'Remboursé', text: 'Reprend tes 500 € et reviens plus ❤️' },
+	{ label: 'Grande roue Dorée', text: 'Deuxième tour sur la roue dorée 🌟' },
+	{ label: '-6000 €', text: 'Perds 6000 € ☠️' },
+];
+
+const GOLDEN_WHEEL = [
+	{ label: '500 €', text: '500 € 🟢' },
+	{ label: '1500 €', text: '1500 € 🔴' },
+	{ label: '3500 €', text: '3500 € 🟠' },
+	{ label: '6500 €', text: '6500 € 🟣' },
+	{ label: '750 €', text: '750 € 🔵' },
+	{ label: '20000 €', text: '20000 € 🟡' },
+	{ label: '3000 €', text: '3000 € 🟤' },
+	{ label: '250 €', text: '250 € ⚫' },
+	{ label: '12000 €', text: '12000 € ⚪' },
+];
+
 function pickRandom(items) {
 	return items[Math.floor(Math.random() * items.length)];
 }
@@ -82,11 +106,53 @@ function spinFortune() {
 	return { tier, reward };
 }
 
+function spinGrandRisk() {
+	if (!GRAND_RISK_WHEEL.length) {
+		return { index: 0, reward: null, labels: [], rewards: [] };
+	}
+	const index = Math.floor(Math.random() * GRAND_RISK_WHEEL.length);
+	const reward = GRAND_RISK_WHEEL[index];
+	return {
+		index,
+		reward,
+		labels: GRAND_RISK_WHEEL.map((item) => item.label),
+		rewards: GRAND_RISK_WHEEL.map((item) => item.text),
+	};
+}
+
+function spinGoldenWheel() {
+	if (!GOLDEN_WHEEL.length) {
+		return { index: 0, reward: null, labels: [], rewards: [] };
+	}
+	const index = Math.floor(Math.random() * GOLDEN_WHEEL.length);
+	const reward = GOLDEN_WHEEL[index];
+	return {
+		index,
+		reward,
+		labels: GOLDEN_WHEEL.map((item) => item.label),
+		rewards: GOLDEN_WHEEL.map((item) => item.text),
+	};
+}
+
+function resolveGrandRiskSequence() {
+	const firstSpin = spinGrandRisk();
+	const steps = [{ wheel: 'grand_risk', ...firstSpin }];
+	if (firstSpin.reward && /grande roue dorée/i.test(String(firstSpin.reward.label || firstSpin.reward.text || ''))) {
+		steps.push({ wheel: 'golden', ...spinGoldenWheel() });
+	}
+	return steps;
+}
+
 module.exports = {
 	WHEEL_TIERS,
 	FORTUNE_WHEELS,
+	GRAND_RISK_WHEEL,
+	GOLDEN_WHEEL,
 	spinTier,
 	spinReward,
 	spinRewardWithIndex,
 	spinFortune,
+	spinGrandRisk,
+	spinGoldenWheel,
+	resolveGrandRiskSequence,
 };

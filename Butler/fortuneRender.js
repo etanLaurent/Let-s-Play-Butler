@@ -40,6 +40,7 @@ function getTierHue(tier) {
 	const t = String(tier || '').toLowerCase();
 	if (t.includes('mauvaise') || t.includes('bad')) return 0; // rouge
 	if (t.includes('super')) return 280; // violet
+	if (t.includes('golden') || t.includes('dor') || t.includes('gold')) return 50; // or
 	return 200; // normale: bleu
 }
 
@@ -212,11 +213,16 @@ function renderFortuneWheelPng({
 			const hue = (baseHue + (360 / n) * seg) % 360;
 			let sat = 0.65;
 			let light = 0.48;
+			const isGoldenTheme = String(tier || '').toLowerCase().includes('golden') || String(tier || '').toLowerCase().includes('dor') || String(tier || '').toLowerCase().includes('gold');
+			if (isGoldenTheme) {
+				sat = seg % 2 === 0 ? 0.78 : 0.06;
+				light = seg % 2 === 0 ? 0.58 : 0.90;
+			}
 
 			// Highlight selected segment
 			if (highlightSelected && seg === picked) {
-				sat = 0.75;
-				light = 0.62;
+				sat = isGoldenTheme ? 0.95 : 0.75;
+				light = isGoldenTheme ? 0.72 : 0.62;
 			}
 
 			// Border ring

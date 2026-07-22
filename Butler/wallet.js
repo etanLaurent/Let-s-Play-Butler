@@ -58,6 +58,18 @@ function addBalance(userId, delta) {
 	return entry.balance;
 }
 
+function spendBalance(userId, amount) {
+	const cost = Math.max(0, Number(amount) || 0);
+	const data = readData();
+	const entry = getUserEntry(data, userId);
+	if (entry.balance < cost) {
+		return { ok: false, balance: entry.balance };
+	}
+	entry.balance -= cost;
+	writeData(data);
+	return { ok: true, balance: entry.balance };
+}
+
 function getFortuneCooldownUntilMs(userId) {
 	const data = readData();
 	return getUserEntry(data, userId).fortuneCooldownUntilMs;
@@ -92,6 +104,7 @@ function clearPendingMultiplier(userId) {
 module.exports = {
 	getBalance,
 	addBalance,
+	spendBalance,
 	getFortuneCooldownUntilMs,
 	setFortuneCooldownUntilMs,
 	getPendingMultiplier,

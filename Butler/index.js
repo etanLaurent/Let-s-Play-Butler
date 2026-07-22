@@ -3,6 +3,7 @@ const {
 	Client,
 	Events,
 	GatewayIntentBits,
+	EmbedBuilder,
 	ActionRowBuilder,
 	ButtonBuilder,
 	ButtonStyle,
@@ -10,11 +11,12 @@ const {
 } = require('discord.js');
 const { getDiscordToken } = require('./token');
 const { formatHelpTopic, getHelpTopicKeys } = require('./helpTopics');
-const { spinRewardWithIndex, spinTier } = require('./fortune');
+const { spinRewardWithIndex, spinTier, resolveGrandRiskSequence } = require('./fortune');
 const { renderFortuneWheelPng, renderTierWheelPng } = require('./fortuneRender');
 const {
 	getBalance,
 	addBalance,
+	spendBalance,
 	getFortuneCooldownUntilMs,
 	setFortuneCooldownUntilMs,
 	getPendingMultiplier,
@@ -39,6 +41,14 @@ const REWARDS_CHANNEL_NAME = '┃✨┃récompenses';
 const FOUNDER_ROLE_NAME = 'Fondateur';
 const LUCKY_ROLE_NAME = 'chanceux';
 const DEFAULT_FORTUNE_COOLDOWN_HOURS = 72;
+const SHOP_FORTUNE_REROLL_PRICE = 200;
+const SHOP_FORTUNE_REROLL_BUTTON_ID = 'shop_buy_fortune_reroll';
+const SHOP_GRAND_RISK_PRICE = 500;
+const SHOP_GRAND_RISK_BUTTON_ID = 'shop_buy_grand_risk';
+
+function formatEuro(value) {
+	return `${Math.max(0, Number(value) || 0).toLocaleString('fr-FR')} €`;
+}
 
 function formatDurationFr(ms) {
 	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -110,6 +120,71 @@ function parseRelanceEffect(label, text) {
 	}
 
 	return { extraSpins, multiplier };
+}
+
+function buildBoutiqueEmbed(balance) {
+	return new EmbedBuilder()
+		.setColor(0xc026d3)
+		.setTitle('🛍️ Boutique Butler')
+		.setDescription(
+			[
+				'Utilise ton argent gagné avec la roue pour acheter des bonus et objets.',
+			].join('\n')
+		)
+		.addFields({
+			name: '🎡 Relance immédiate',
+			value: [
+				'Relance immédiatement la roue sans attendre le cooldown.',
+				`Prix: **${formatEuro(SHOP_FORTUNE_REROLL_PRICE)}**`,
+				'Tu réinitialises ton cooldown Fortune au moment de l’achat.',
+			].join('\n'),
+		}, {
+			name: '🟣 Roue du grand risque',
+			value: [
+				'Une roue en 1 tour avec 9 issues: 1 rien, 4 bonus et 4 malus.',
+				`Prix: **${formatEuro(SHOP_GRAND_RISK_PRICE)}**`,
+				'Le résultat est appliqué immédiatement après l’achat.',
+			].join('\n'),
+		})
+		.setFooter({
+			text: `Solde: ${formatEuro(balance)} • Page 1/1 • Tri: Prix croissant`,
+		});
+}
+
+function buildBoutiqueComponents() {
+	return [
+		new ActionRowBuilder().addComponents(
+			new ButtonBuilder()
+				.setCustomId(SHOP_FORTUNE_REROLL_BUTTON_ID)
+				.setLabel('Acheter')
+				.setStyle(ButtonStyle.Primary),
+			new ButtonBuilder()
+				.setCustomId(SHOP_GRAND_RISK_BUTTON_ID)
+				.setLabel('Grand risque')
+				.setStyle(ButtonStyle.Danger)
+		)
+	];
+}
+
+function buildGrandRiskResultEmbed({ balanceBefore, balanceAfter, steps }) {
+	const primaryReward = steps[0] && steps[0].reward ? steps[0].reward : null;
+	const primaryText = primaryReward ? primaryReward.text : 'Résultat inconnu';
+	const isGain = /\b\d+\s*€/i.test(primaryText) && !/perd/i.test(primaryText);
+	const isLoss = /perd/i.test(primaryText);
+	return new EmbedBuilder()
+		.setColor(isGain ? 0xd946ef : isLoss ? 0x4c1d95 : 0x111827)
+		.setTitle('🟣 Roue du grand risque')
+		.setDescription(
+			[
+				`Coût de lancement: **${formatEuro(SHOP_GRAND_RISK_PRICE)}**`,
+				...steps.map((step) => {
+					const reward = step.reward || {};
+					return `🎯 **${reward.label}** → ${reward.text}`;
+				}),
+				`Solde avant: **${formatEuro(balanceBefore)}**`,
+				`Solde après: **${formatEuro(balanceAfter)}**`,
+			].join('\n')
+		);
 }
 
 async function resolveRewardsChannel(guild) {
@@ -270,6 +345,75 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				.slice(0, 25)
 				.map((k) => ({ name: k, value: k }));
 			await interaction.respond(filtered);
+			return;
+		}
+
+		if (interaction.isButton && interaction.isButton()) {
+			if (interaction.customId !== SHOP_FORTUNE_REROLL_BUTTON_ID && interaction.customId !== SHOP_GRAND_RISK_BUTTON_ID) return;
+
+			if (interaction.customId === SHOP_GRAND_RISK_BUTTON_ID) {
+				const spendResult = spendBalance(interaction.user.id, SHOP_GRAND_RISK_PRICE);
+				if (!spendResult.ok) {
+					await interaction.reply({
+						content: `Solde insuffisant. Il te faut encore **${formatEuro(SHOP_GRAND_RISK_PRICE - spendResult.balance)}** pour lancer la roue du grand risque.`,
+						ephemeral: true,
+					});
+					return;
+				}
+
+				const balanceBefore = spendResult.balance + SHOP_GRAND_RISK_PRICE;
+				const steps = resolveGrandRiskSequence();
+				const files = [];
+
+				for (const step of steps) {
+					const isGolden = String(step.wheel || '').toLowerCase() === 'golden';
+					const png = renderFortuneWheelPng({
+						tier: isGolden ? 'golden' : 'super',
+						labels: step.labels,
+						selectedIndex: step.index,
+						size: 512,
+					});
+					files.push(new AttachmentBuilder(png, { name: isGolden ? 'grand-risque-doree.png' : 'grand-risque.png' }));
+
+					const reward = step.reward || {};
+					const moneyDelta = computeMoneyDelta({ label: reward.label, text: reward.text });
+					if (moneyDelta !== 0) {
+						addBalance(interaction.user.id, moneyDelta);
+					}
+				}
+
+				const balanceAfter = getBalance(interaction.user.id);
+
+				await interaction.reply({
+					ephemeral: true,
+					files,
+					embeds: [buildGrandRiskResultEmbed({
+						balanceBefore,
+						balanceAfter,
+						steps,
+					})],
+				});
+				return;
+			}
+
+			const result = spendBalance(interaction.user.id, SHOP_FORTUNE_REROLL_PRICE);
+			if (!result.ok) {
+				await interaction.reply({
+					content: `Solde insuffisant. Il te faut encore **${formatEuro(SHOP_FORTUNE_REROLL_PRICE - result.balance)}** pour acheter cette relance.`,
+					ephemeral: true,
+				});
+				return;
+			}
+
+			setFortuneCooldownUntilMs(interaction.user.id, 0);
+			await interaction.update({
+				embeds: [buildBoutiqueEmbed(result.balance)],
+				components: buildBoutiqueComponents(),
+			});
+			await interaction.followUp({
+				content: '✅ Achat validé. Tu peux relancer la roue tout de suite avec /fortune tourner.',
+				ephemeral: true,
+			});
 			return;
 		}
 
@@ -626,6 +770,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			await interaction.editReply({
 				content: replyLines.filter(Boolean).join('\n'),
 				files,
+			});
+			return;
+		}
+
+		if (interaction.commandName === 'boutique') {
+			const balance = getBalance(interaction.user.id);
+			await interaction.reply({
+				embeds: [buildBoutiqueEmbed(balance)],
+				components: buildBoutiqueComponents(),
 			});
 			return;
 		}

@@ -47,6 +47,7 @@ const HELP_TOPICS = {
 		title: 'Argent (monnaie du serveur)',
 		lines: [
 			'Argent virtuel gagné via activité/jeux, dépensé dans une boutique.',
+			'La boutique propose notamment une relance immédiate de la roue contre 200 €.',
 			'Exemples: acheter des rôles cosmétiques.',
 			"Important: c'est virtuel (pas d'argent réel).",
 		],

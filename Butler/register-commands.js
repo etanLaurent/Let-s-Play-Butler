@@ -1,6 +1,23 @@
-const { REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { REST, Routes, SlashCommandBuilder, Client } = require('discord.js');
 const { getHelpTopicKeys } = require('./helpTopics');
 const { getDiscordToken } = require('./token');
+
+async function resolveClientId(token) {
+	const explicitClientId = (process.env.DISCORD_CLIENT_ID || '').trim();
+	if (explicitClientId) return explicitClientId;
+
+	const client = new Client({ intents: [] });
+	try {
+		await client.login(token);
+		return client.application?.id || client.user?.id || null;
+	} finally {
+		try {
+			client.destroy();
+		} catch {
+			// ignore
+		}
+	}
+}
 
 async function main() {
 	const token = getDiscordToken();
@@ -11,10 +28,10 @@ async function main() {
 		process.exit(1);
 	}
 
-	const clientId = (process.env.DISCORD_CLIENT_ID || '').trim();
+	const clientId = await resolveClientId(token);
 	if (!clientId) {
 		console.error(
-			'DISCORD_CLIENT_ID manquant. Copie l’Application ID dans le Discord Developer Portal et mets-le en variable d’environnement.'
+			'Impossible de résoudre l’Application ID Discord depuis le token. Vérifie le token et, si besoin, définis DISCORD_CLIENT_ID manuellement.'
 		);
 		process.exit(1);
 	}
@@ -54,6 +71,10 @@ async function main() {
 				.setRequired(true)
 		);
 
+	const boutique = new SlashCommandBuilder()
+		.setName('boutique')
+		.setDescription('Ouvre la boutique du serveur.');
+
 	const chanceux = new SlashCommandBuilder()
 		.setName('chanceux')
 		.setDescription('Gestion du rôle chanceux.')
@@ -69,7 +90,13 @@ async function main() {
 				)
 		);
 
-	const commands = [aideButler.toJSON(), fortune.toJSON(), fortuneReset.toJSON(), chanceux.toJSON()];
+	const commands = [
+		aideButler.toJSON(),
+		fortune.toJSON(),
+		boutique.toJSON(),
+		fortuneReset.toJSON(),
+		chanceux.toJSON(),
+	];
 	const rest = new REST({ version: '10' }).setToken(token);
 
 	if (guildId) {
