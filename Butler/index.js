@@ -12,7 +12,14 @@ const {
 const { getDiscordToken } = require('./token');
 const { formatHelpTopic, getHelpTopicKeys } = require('./helpTopics');
 const { spinRewardWithIndex, spinTier, resolveGrandRiskSequence } = require('./fortune');
-const { renderFortuneWheelPng, renderTierWheelPng } = require('./fortuneRender');
+	const { renderFortuneWheelPng, renderTierWheelPng, renderRouletteWheelPng } = require('./fortuneRender');
+	const {
+		ROULETTE_ORDER,
+		getRouletteColor,
+		parseRouletteChoice,
+		spinRoulette,
+		resolveRouletteBet,
+	} = require('./roulette');
 const {
 	getBalance,
 	addBalance,
@@ -43,7 +50,7 @@ const LUCKY_ROLE_NAME = 'chanceux';
 const DEFAULT_FORTUNE_COOLDOWN_HOURS = 72;
 const SHOP_FORTUNE_REROLL_PRICE = 200;
 const SHOP_FORTUNE_REROLL_BUTTON_ID = 'shop_buy_fortune_reroll';
-const SHOP_GRAND_RISK_PRICE = 500;
+const SHOP_GRAND_RISK_PRICE = 2500;
 const SHOP_GRAND_RISK_BUTTON_ID = 'shop_buy_grand_risk';
 
 function formatEuro(value) {
@@ -129,6 +136,7 @@ function buildBoutiqueEmbed(balance) {
 		.setDescription(
 			[
 				'Utilise ton argent gagné avec la roue pour acheter des bonus et objets.',
+				'Boutique ouverte - achat rapide via les boutons ci-dessous.',
 			].join('\n')
 		)
 		.addFields({
@@ -147,7 +155,7 @@ function buildBoutiqueEmbed(balance) {
 			].join('\n'),
 		})
 		.setFooter({
-			text: `Solde: ${formatEuro(balance)} • Page 1/1 • Tri: Prix croissant`,
+			text: `Solde: ${formatEuro(balance)} • Tri: Prix croissant`,
 		});
 }
 
@@ -156,11 +164,11 @@ function buildBoutiqueComponents() {
 		new ActionRowBuilder().addComponents(
 			new ButtonBuilder()
 				.setCustomId(SHOP_FORTUNE_REROLL_BUTTON_ID)
-				.setLabel('Acheter')
+				.setLabel('Acheter 200 €')
 				.setStyle(ButtonStyle.Primary),
 			new ButtonBuilder()
 				.setCustomId(SHOP_GRAND_RISK_BUTTON_ID)
-				.setLabel('Grand risque')
+				.setLabel('Grand risque 2500 €')
 				.setStyle(ButtonStyle.Danger)
 		)
 	];
@@ -337,6 +345,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 		if (interaction.isAutocomplete && interaction.isAutocomplete()) {
+			if (interaction.commandName === 'roulette') {
+				const focused = (interaction.options.getString('choix') || '').toLowerCase();
+				const choices = ['rouge', 'noir', 'vert', ...Array.from({ length: 37 }, (_, i) => String(i))];
+				await interaction.respond(
+					choices
+						.filter((choice) => choice.includes(focused))
+						.slice(0, 25)
+						.map((choice) => ({ name: choice, value: choice }))
+				);
+				return;
+			}
 			if (interaction.commandName !== 'aide_butler') return;
 			const focused = (interaction.options.getFocused() || '').toLowerCase();
 			const keys = getHelpTopicKeys();
@@ -363,9 +382,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 				const balanceBefore = spendResult.balance + SHOP_GRAND_RISK_PRICE;
 				const steps = resolveGrandRiskSequence();
-				const files = [];
+				await interaction.deferReply();
 
-				for (const step of steps) {
+				const header = '🟣 **Roue du grand risque**';
+				const bar = (filled, total) => '▰'.repeat(filled) + '▱'.repeat(Math.max(0, total - filled));
+
+				await interaction.editReply([header, '', 'La roue du grand risque tourne... 🔄', bar(1, 6)].join('\n'));
+				await sleep(900);
+				await interaction.editReply([header, '', 'La roue du grand risque tourne... 🔄', bar(3, 6)].join('\n'));
+				await sleep(900);
+				await interaction.editReply([header, '', 'La roue du grand risque tourne... 🔄', bar(5, 6)].join('\n'));
+				await sleep(900);
+
+				const files = [];
+				const summarySteps = [];
+
+				for (let i = 0; i < steps.length; i++) {
+					const step = steps[i];
 					const isGolden = String(step.wheel || '').toLowerCase() === 'golden';
 					const png = renderFortuneWheelPng({
 						tier: isGolden ? 'golden' : 'super',
@@ -380,18 +413,60 @@ client.on(Events.InteractionCreate, async (interaction) => {
 					if (moneyDelta !== 0) {
 						addBalance(interaction.user.id, moneyDelta);
 					}
+
+					summarySteps.push(`🎯 **${reward.label}** → ${reward.text}`);
+
+					const nextHeader = isGolden && i === 0
+						? [header, '', `Tour 1 → **${reward.label}**`, '', 'La roue dorée tourne... 🌟', bar(1, 6)].join('\n')
+						: [header, '', `Tour ${i + 1} → **${reward.label}**`].join('\n');
+
+					await interaction.editReply({
+						content: nextHeader,
+						files: files.slice(),
+					});
+
+					if (isGolden && i === 0) {
+						await sleep(900);
+						await interaction.editReply([header, '', `Tour 1 → **${reward.label}**`, '', 'La roue dorée tourne... 🌟', bar(3, 6)].join('\n'));
+						await sleep(900);
+						await interaction.editReply([header, '', `Tour 1 → **${reward.label}**`, '', 'La roue dorée tourne... 🌟', bar(5, 6)].join('\n'));
+						await sleep(900);
+					}
 				}
 
 				const balanceAfter = getBalance(interaction.user.id);
 
-				await interaction.reply({
-					ephemeral: true,
+				try {
+					const rewardsChannel = await resolveRewardsChannel(interaction.guild);
+					if (rewardsChannel) {
+						await rewardsChannel.send(
+							[
+								`🟣 Grand risque — ${interaction.user}`,
+								`Solde avant: **${formatEuro(balanceBefore)}**`,
+								`Solde après: **${formatEuro(balanceAfter)}**`,
+								'',
+								...steps.map((step, index) => {
+									const reward = step.reward || {};
+									const prefix = index === 0 ? 'Tour 1' : `Tour ${index + 1}`;
+									return `${prefix} → **${reward.label}** : ${reward.text}`;
+								}),
+							].join('\n')
+						);
+					}
+				} catch (err) {
+					console.error('Erreur annonce grand risque:', err);
+				}
+
+				await interaction.editReply({
+					content: [
+						header,
+						'',
+						`Solde avant: **${formatEuro(balanceBefore)}**`,
+						`Solde après: **${formatEuro(balanceAfter)}**`,
+						'',
+						...summarySteps,
+					].join('\n'),
 					files,
-					embeds: [buildGrandRiskResultEmbed({
-						balanceBefore,
-						balanceAfter,
-						steps,
-					})],
 				});
 				return;
 			}
@@ -418,6 +493,52 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		}
 
 		if (!interaction.isChatInputCommand || !interaction.isChatInputCommand()) return;
+
+		if (interaction.commandName === 'roulette') {
+			const stake = interaction.options.getNumber('mise', true);
+			const choice = interaction.options.getString('choix', true);
+			const parsedChoice = parseRouletteChoice(choice);
+			if (!parsedChoice) {
+				await interaction.reply({ content: 'Choix invalide. Utilise rouge, noir, vert ou un numéro de 0 à 36.', ephemeral: true });
+				return;
+			}
+
+			const spendResult = spendBalance(interaction.user.id, stake);
+			if (!spendResult.ok) {
+				await interaction.reply({
+					content: `Solde insuffisant. Il te manque **${formatEuro(stake - spendResult.balance)}**.`,
+					ephemeral: true,
+				});
+				return;
+			}
+
+			const result = spinRoulette();
+			const resolution = resolveRouletteBet(choice, stake, result);
+			const rouletteColors = ROULETTE_ORDER.map((number) => {
+				const color = getRouletteColor(number);
+				return color === 'rouge' ? { r: 180, g: 32, b: 45 } : color === 'noir' ? { r: 24, g: 26, b: 31 } : { r: 24, g: 140, b: 76 };
+			});
+			const wheel = renderRouletteWheelPng({ order: ROULETTE_ORDER, colors: rouletteColors, selectedIndex: result.index });
+			const resultLabel = result.number === 0 ? '0 vert' : `${result.number} ${result.color}`;
+			if (resolution.payout > 0) addBalance(interaction.user.id, resolution.payout);
+
+			await interaction.reply({
+				content: [
+					'🎰 **Roulette européenne**',
+					'',
+					`Mise : **${formatEuro(stake)}** sur **${choice}**`,
+					`Résultat : **${resultLabel}**`,
+					resolution.won
+						? `🎉 Gagné : **+${formatEuro(resolution.net)}** (paiement x${resolution.multiplier})`
+						: resolution.bet.type === 'green'
+							? `Perdu sur vert : remboursement de **${formatEuro(resolution.payout)}** (perte nette de ${formatEuro(Math.abs(resolution.net))}).`
+							: `Perdu : la mise est entièrement perdue (**${formatEuro(Math.abs(resolution.net))}**).`,
+					`Solde : **${formatEuro(getBalance(interaction.user.id))}**`,
+				].join('\n'),
+				files: [new AttachmentBuilder(wheel, { name: 'roulette.png' })],
+			});
+			return;
+		}
 
 		if (interaction.commandName === 'fortune_reset') {
 			if (!interaction.guild) {

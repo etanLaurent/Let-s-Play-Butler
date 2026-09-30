@@ -44,6 +44,27 @@ function getTierHue(tier) {
 	return 200; // normale: bleu
 }
 
+function isGoldenTheme(tier) {
+	const t = String(tier || '').toLowerCase();
+	return t.includes('golden') || t.includes('dor') || t.includes('gold');
+}
+
+function getGoldenSegmentColor(segmentIndex, segmentCount, selected) {
+	const total = Math.max(1, Number(segmentCount) || 1);
+	const t = total === 1 ? 0 : segmentIndex / (total - 1);
+	const base = {
+		r: 165,
+		g: 120,
+		b: 0,
+	};
+	const top = selected ? { r: 255, g: 252, b: 235 } : { r: 255, g: 255, b: 255 };
+	return {
+		r: Math.round(lerp(base.r, top.r, t)),
+		g: Math.round(lerp(base.g, top.g, t)),
+		b: Math.round(lerp(base.b, top.b, t)),
+	};
+}
+
 function foldAscii(input) {
 	return String(input || '')
 		.normalize('NFD')
@@ -168,6 +189,7 @@ function renderFortuneWheelPng({
 	tier,
 	segmentCount,
 	labels,
+	segmentColors,
 	selectedIndex,
 	size = 512,
 	drawPointer = true,
@@ -213,16 +235,32 @@ function renderFortuneWheelPng({
 			const hue = (baseHue + (360 / n) * seg) % 360;
 			let sat = 0.65;
 			let light = 0.48;
-			const isGoldenTheme = String(tier || '').toLowerCase().includes('golden') || String(tier || '').toLowerCase().includes('dor') || String(tier || '').toLowerCase().includes('gold');
-			if (isGoldenTheme) {
-				sat = seg % 2 === 0 ? 0.78 : 0.06;
-				light = seg % 2 === 0 ? 0.58 : 0.90;
+			const goldenTheme = isGoldenTheme(tier);
+			if (Array.isArray(segmentColors) && segmentColors[seg]) {
+				const base = segmentColors[seg];
+				const selectedBoost = highlightSelected && seg === picked ? 1.22 : 1;
+				const shade = 0.82 + 0.18 * clamp01((radius - r) / radius);
+				const separator = r < radius - 1 && r > hubRadius + 1 && ((a2 / segAngle) % 1 < 0.014 || (a2 / segAngle) % 1 > 0.986);
+				const factor = separator ? 0.18 : shade * selectedBoost;
+				png.data[idx + 0] = Math.min(255, Math.round(base.r * factor));
+				png.data[idx + 1] = Math.min(255, Math.round(base.g * factor));
+				png.data[idx + 2] = Math.min(255, Math.round(base.b * factor));
+				png.data[idx + 3] = 255;
+				continue;
+			}
+			if (goldenTheme) {
+				const rgb = getGoldenSegmentColor(seg, n, highlightSelected && seg === picked);
+				png.data[idx + 0] = rgb.r;
+				png.data[idx + 1] = rgb.g;
+				png.data[idx + 2] = rgb.b;
+				png.data[idx + 3] = 255;
+				continue;
 			}
 
 			// Highlight selected segment
 			if (highlightSelected && seg === picked) {
-				sat = isGoldenTheme ? 0.95 : 0.75;
-				light = isGoldenTheme ? 0.72 : 0.62;
+				sat = goldenTheme ? 0.98 : 0.75;
+				light = goldenTheme ? 0.72 : 0.62;
 			}
 
 			// Border ring
@@ -276,7 +314,7 @@ function renderFortuneWheelPng({
 	if (drawLabels && labelList.length) {
 		// Labels des segments (proches du bord)
 		const textRadius = radius * 0.62;
-		const textColor = { r: 255, g: 255, b: 255 };
+		const textColor = isGoldenTheme(tier) ? { r: 20, g: 20, b: 20 } : { r: 255, g: 255, b: 255 };
 		for (let seg = 0; seg < n; seg++) {
 			const label = labelList[seg] || `R${seg + 1}`;
 			// centre de segment en angle "wheel" (0 en haut, horaire)
@@ -303,6 +341,20 @@ function renderFortuneWheelPng({
 	return PNG.sync.write(png);
 }
 
+function renderRouletteWheelPng({ order, colors, selectedIndex, size = 768 }) {
+	const labels = (Array.isArray(order) ? order : []).map((number) => String(number));
+	return renderFortuneWheelPng({
+		tier: 'roulette',
+		labels,
+		segmentColors: colors,
+		selectedIndex,
+		size,
+		drawPointer: true,
+		drawLabels: true,
+		highlightSelected: true,
+	});
+}
+
 function renderTierWheelPng({ selectedTier, size = 512 }) {
 	const selected = String(selectedTier || '').toLowerCase();
 	const labels = ['MAUVAISE', 'NORMALE', 'SUPER'];
@@ -322,4 +374,4 @@ function renderTierWheelPng({ selectedTier, size = 512 }) {
 	});
 }
 
-module.exports = { renderFortuneWheelPng, renderTierWheelPng };
+module.exports = { renderFortuneWheelPng, renderTierWheelPng, renderRouletteWheelPng };

@@ -45,26 +45,26 @@ const FORTUNE_WHEELS = {
 
 const GRAND_RISK_WHEEL = [
 	{ label: 'Rien', text: 'Reste où tu en es je pense 😐' },
-	{ label: '8 Level', text: '8 niveaux Draftbot, votre récompense arrivera bientôt ! 🎯' },
+	{ label: '5 Level', text: '5 niveaux Draftbot, votre récompense arrivera bientôt ! 🎯' },
 	{ label: '3500 €', text: '3500 € 🟠' },
 	{ label: '-1000 €', text: 'Perds 1000 € 🥲' },
-	{ label: '-200 €', text: 'Perds 200 € 😶' },
-	{ label: 'Triple Jackpot', text: '15000 € et 9 niveaux Draftbot 🏆' },
-	{ label: 'Remboursé', text: 'Reprend tes 500 € et reviens plus ❤️' },
+	{ label: '-2500 €', text: 'Perds 2500 € 😶' },
+	{ label: 'Double Jackpot', text: '10000 € et 6 niveaux Draftbot 🏆' },
+	{ label: 'Remboursé', text: 'Reprend tes 2500 € et reviens plus ❤️' },
 	{ label: 'Grande roue Dorée', text: 'Deuxième tour sur la roue dorée 🌟' },
-	{ label: '-6000 €', text: 'Perds 6000 € ☠️' },
+	{ label: '-7000 €', text: 'Perds 7000 € ☠️' },
 ];
 
 const GOLDEN_WHEEL = [
-	{ label: '500 €', text: '500 € 🟢' },
-	{ label: '1500 €', text: '1500 € 🔴' },
-	{ label: '3500 €', text: '3500 € 🟠' },
-	{ label: '6500 €', text: '6500 € 🟣' },
-	{ label: '750 €', text: '750 € 🔵' },
+	{ label: '2000 €', text: '2000 € 🟢' },
+	{ label: '3000 €', text: '3000 € 🔴' },
+	{ label: '4000 €', text: '4000 € 🟠' },
+	{ label: '6000 €', text: '6000 € 🟣' },
+	{ label: '1000 €', text: '1000 € 🔵' },
 	{ label: '20000 €', text: '20000 € 🟡' },
 	{ label: '3000 €', text: '3000 € 🟤' },
-	{ label: '250 €', text: '250 € ⚫' },
-	{ label: '12000 €', text: '12000 € ⚪' },
+	{ label: '750 €', text: '750 € ⚫' },
+	{ label: '12500 €', text: '12500 € ⚪' },
 ];
 
 function pickRandom(items) {

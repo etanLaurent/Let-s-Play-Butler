@@ -75,6 +75,25 @@ async function main() {
 		.setName('boutique')
 		.setDescription('Ouvre la boutique du serveur.');
 
+	const roulette = new SlashCommandBuilder()
+		.setName('roulette')
+		.setDescription('Parie sur la roulette européenne.')
+		.addNumberOption((opt) =>
+			opt
+				.setName('mise')
+				.setDescription('Montant de la mise en euros.')
+				.setMaxValue(1000000000)
+				.setMinValue(1)
+				.setRequired(true)
+		)
+		.addStringOption((opt) =>
+			opt
+				.setName('choix')
+				.setDescription('rouge, noir, vert ou un numéro de 0 à 36.')
+				.setAutocomplete(true)
+				.setRequired(true)
+		);
+
 	const chanceux = new SlashCommandBuilder()
 		.setName('chanceux')
 		.setDescription('Gestion du rôle chanceux.')
@@ -94,6 +113,7 @@ async function main() {
 		aideButler.toJSON(),
 		fortune.toJSON(),
 		boutique.toJSON(),
+		roulette.toJSON(),
 		fortuneReset.toJSON(),
 		chanceux.toJSON(),
 	];
